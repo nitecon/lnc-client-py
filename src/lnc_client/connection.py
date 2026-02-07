@@ -15,7 +15,7 @@ import contextlib
 import logging
 import ssl
 
-import crc32c
+import zlib
 
 from lnc_client.config import ReconnectConfig
 from lnc_client.errors import (
@@ -163,7 +163,7 @@ class LwpConnection:
 
         # Validate payload CRC
         if header.payload_crc != 0:
-            actual_crc = crc32c.crc32c(data)
+            actual_crc = zlib.crc32(data) & 0xFFFFFFFF
             if actual_crc != header.payload_crc:
                 raise InvalidFrameError(
                     f"Payload CRC mismatch: got {actual_crc:#010x}, "

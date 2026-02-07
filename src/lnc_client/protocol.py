@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
 
-import crc32c
+import zlib
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -157,7 +157,7 @@ class LwpHeader:
         """Serialize this header to 44 bytes with computed CRC."""
         # Build first 8 bytes for CRC computation
         pre = struct.pack("<4sBBH", MAGIC, self.version, self.flags, 0)
-        hdr_crc = crc32c.crc32c(pre)
+        hdr_crc = zlib.crc32(pre) & 0xFFFFFFFF
 
         return _HEADER_STRUCT.pack(
             MAGIC,
@@ -203,7 +203,7 @@ class LwpHeader:
             raise InvalidFrameError(f"Invalid magic: {magic!r}")
 
         # Validate header CRC (covers bytes 0-7)
-        expected_crc = crc32c.crc32c(bytes(buf[:8]))
+        expected_crc = zlib.crc32(bytes(buf[:8])) & 0xFFFFFFFF
         if hdr_crc != expected_crc:
             raise InvalidFrameError(
                 f"Header CRC mismatch: got {hdr_crc:#010x}, expected {expected_crc:#010x}"
@@ -244,7 +244,7 @@ def build_ingest_frame(
     if compressed:
         flags |= Flag.COMPRESSED
 
-    payload_crc = crc32c.crc32c(payload)
+    payload_crc = zlib.crc32(payload) & 0xFFFFFFFF
     hdr = LwpHeader(
         flags=flags,
         batch_id=batch_id,
@@ -268,7 +268,7 @@ def build_control_frame(
     topic_id: int = 0,
 ) -> bytes:
     """Build a Control frame for topic management or fetch operations."""
-    payload_crc = crc32c.crc32c(payload) if payload else 0
+    payload_crc = zlib.crc32(payload) & 0xFFFFFFFF if payload else 0
     hdr = LwpHeader(
         flags=Flag.CONTROL,
         batch_id=int(command),

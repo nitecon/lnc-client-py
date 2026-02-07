@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lnc-client"
-version = "0.1.0"
+version = "0.0.0"
 description = "Python client for the Lance Wire Protocol (LWP) — high-performance, low-latency data streaming"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -26,7 +26,6 @@ classifiers = [
     "Topic :: System :: Networking",
 ]
 dependencies = [
-    "crc32c>=2.7",
     "lz4>=4.3",
 ]
 

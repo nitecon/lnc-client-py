@@ -49,6 +49,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+      - name: Set version from git tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          sed -i "s/^version = \"0.0.0\"/version = \"${VERSION}\"/" pyproject.toml
+          echo "Set version to ${VERSION}"
+          grep '^version' pyproject.toml
       - name: Install build tools
         run: pip install build
       - name: Build sdist and wheel

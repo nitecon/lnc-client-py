@@ -1,8 +1,8 @@
 """Tests for LWP header parsing, serialization, and CRC32C validation."""
 
 import struct
+import zlib
 
-import crc32c
 import pytest
 
 from lnc_client.errors import InvalidFrameError
@@ -119,8 +119,8 @@ class TestKeepaliveFrame:
         # Header CRC is at bytes 8-11 (LE)
         hdr_crc = struct.unpack_from("<I", frame, 8)[0]
 
-        # Manually compute: CRC32C of first 8 bytes
-        expected = crc32c.crc32c(frame[:8])
+        # Manually compute: CRC32 of first 8 bytes
+        expected = zlib.crc32(frame[:8]) & 0xFFFFFFFF
         assert hdr_crc == expected
 
 
@@ -147,7 +147,7 @@ class TestIngestFrame:
         # Verify payload CRC
         actual_payload = frame[HEADER_SIZE:]
         assert actual_payload == payload
-        assert hdr.payload_crc == crc32c.crc32c(payload)
+        assert hdr.payload_crc == zlib.crc32(payload) & 0xFFFFFFFF
 
     def test_compressed_flag(self):
         frame = build_ingest_frame(
@@ -241,14 +241,14 @@ class TestControlPayloads:
         assert parsed_data == data
 
 
-class TestCrc32cVectors:
-    """Verify CRC32C against spec test vectors."""
+class TestCrc32Vectors:
+    """Verify CRC32 (zlib) against known test vectors."""
 
     def test_empty(self):
-        assert crc32c.crc32c(b"") == 0x00000000
+        assert zlib.crc32(b"") & 0xFFFFFFFF == 0x00000000
 
     def test_single_char(self):
-        assert crc32c.crc32c(b"a") == 0xC1D04330
+        assert zlib.crc32(b"a") & 0xFFFFFFFF == 0xE8B7BE43
 
     def test_hello(self):
-        assert crc32c.crc32c(b"hello") == 0x9A71BB4C
+        assert zlib.crc32(b"hello") & 0xFFFFFFFF == 0x3610A686

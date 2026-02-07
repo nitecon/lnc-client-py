@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import struct
 import time
+import zlib
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
-
-import zlib
 
 # ---------------------------------------------------------------------------
 # Constants

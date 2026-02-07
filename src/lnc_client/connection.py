@@ -14,7 +14,6 @@ import asyncio
 import contextlib
 import logging
 import ssl
-
 import zlib
 
 from lnc_client.config import ReconnectConfig

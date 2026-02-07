@@ -11,22 +11,20 @@ Provides a low-level connection wrapper that handles:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import ssl
-from typing import Optional
 
 import crc32c
 
 from lnc_client.config import ReconnectConfig
 from lnc_client.errors import (
-    BackpressureError,
     ConnectionError,
     InvalidFrameError,
     TimeoutError,
 )
 from lnc_client.protocol import (
     HEADER_SIZE,
-    Flag,
     LwpHeader,
     build_keepalive_frame,
 )
@@ -73,20 +71,15 @@ class LwpConnection:
         """Open the TCP connection and start keepalive."""
         try:
             self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_connection(
-                    self._host, self._port, ssl=self._ssl
-                ),
+                asyncio.open_connection(self._host, self._port, ssl=self._ssl),
                 timeout=self._connect_timeout,
             )
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             raise TimeoutError(
-                f"Connection to {self._host}:{self._port} timed out "
-                f"after {self._connect_timeout}s"
-            )
-        except OSError as e:
-            raise ConnectionError(
-                f"Failed to connect to {self._host}:{self._port}: {e}"
+                f"Connection to {self._host}:{self._port} timed out after {self._connect_timeout}s"
             ) from e
+        except OSError as e:
+            raise ConnectionError(f"Failed to connect to {self._host}:{self._port}: {e}") from e
 
         self._connected = True
         self._backpressure = False
@@ -98,10 +91,8 @@ class LwpConnection:
         self._connected = False
         if self._keepalive_task:
             self._keepalive_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._keepalive_task
-            except asyncio.CancelledError:
-                pass
             self._keepalive_task = None
 
         if self._writer:
@@ -124,14 +115,15 @@ class LwpConnection:
         while True:
             attempt += 1
             if cfg.max_attempts > 0 and attempt > cfg.max_attempts:
-                raise ConnectionError(
-                    f"Failed to reconnect after {cfg.max_attempts} attempts"
-                )
+                raise ConnectionError(f"Failed to reconnect after {cfg.max_attempts} attempts")
 
             delay = cfg.delay_for_attempt(attempt)
             log.info(
                 "Reconnect attempt %d in %.1fs to %s:%d",
-                attempt, delay, self._host, self._port,
+                attempt,
+                delay,
+                self._host,
+                self._port,
             )
             await asyncio.sleep(delay)
 
@@ -162,9 +154,7 @@ class LwpConnection:
         buf = await self._recv_exact(HEADER_SIZE, timeout)
         return LwpHeader.decode(buf)
 
-    async def recv_payload(
-        self, header: LwpHeader, timeout: float | None = None
-    ) -> bytes:
+    async def recv_payload(self, header: LwpHeader, timeout: float | None = None) -> bytes:
         """Read the payload for a given header and validate its CRC."""
         if header.payload_length == 0:
             return b""
@@ -182,9 +172,7 @@ class LwpConnection:
 
         return data
 
-    async def recv_frame(
-        self, timeout: float | None = None
-    ) -> tuple[LwpHeader, bytes]:
+    async def recv_frame(self, timeout: float | None = None) -> tuple[LwpHeader, bytes]:
         """Read a complete frame (header + payload).
 
         Automatically handles Keepalive and Backpressure frames inline.
@@ -213,27 +201,21 @@ class LwpConnection:
 
     # ----- internal -----
 
-    async def _recv_exact(
-        self, n: int, timeout: float | None = None
-    ) -> bytes:
+    async def _recv_exact(self, n: int, timeout: float | None = None) -> bytes:
         """Read exactly n bytes from the stream."""
         if not self._reader or not self._connected:
             raise ConnectionError("Not connected")
 
         try:
             if timeout:
-                data = await asyncio.wait_for(
-                    self._reader.readexactly(n), timeout=timeout
-                )
+                data = await asyncio.wait_for(self._reader.readexactly(n), timeout=timeout)
             else:
                 data = await self._reader.readexactly(n)
-        except asyncio.TimeoutError:
-            raise TimeoutError(f"Read timed out after {timeout}s")
+        except asyncio.TimeoutError as e:
+            raise TimeoutError(f"Read timed out after {timeout}s") from e
         except asyncio.IncompleteReadError as e:
             self._connected = False
-            raise ConnectionError(
-                f"Connection closed (read {len(e.partial)}/{n} bytes)"
-            ) from e
+            raise ConnectionError(f"Connection closed (read {len(e.partial)}/{n} bytes)") from e
         except OSError as e:
             self._connected = False
             raise ConnectionError(f"Read failed: {e}") from e

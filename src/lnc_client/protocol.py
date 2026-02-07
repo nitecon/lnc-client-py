@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import struct
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum, IntFlag
 
 import crc32c
@@ -174,7 +174,7 @@ class LwpHeader:
         )
 
     @classmethod
-    def decode(cls, buf: bytes | bytearray | memoryview) -> "LwpHeader":
+    def decode(cls, buf: bytes | bytearray | memoryview) -> LwpHeader:
         """Parse a 44-byte buffer into an LwpHeader.
 
         Raises:
@@ -183,9 +183,7 @@ class LwpHeader:
         from lnc_client.errors import InvalidFrameError
 
         if len(buf) < HEADER_SIZE:
-            raise InvalidFrameError(
-                f"Buffer too small: {len(buf)} < {HEADER_SIZE}"
-            )
+            raise InvalidFrameError(f"Buffer too small: {len(buf)} < {HEADER_SIZE}")
 
         (
             magic,
@@ -208,8 +206,7 @@ class LwpHeader:
         expected_crc = crc32c.crc32c(bytes(buf[:8]))
         if hdr_crc != expected_crc:
             raise InvalidFrameError(
-                f"Header CRC mismatch: got {hdr_crc:#010x}, "
-                f"expected {expected_crc:#010x}"
+                f"Header CRC mismatch: got {hdr_crc:#010x}, expected {expected_crc:#010x}"
             )
 
         return cls(
@@ -305,16 +302,12 @@ def build_unsubscribe_payload(topic_id: int, consumer_id: int) -> bytes:
     return struct.pack("<IQ", topic_id, consumer_id)
 
 
-def build_commit_offset_payload(
-    topic_id: int, consumer_id: int, offset: int
-) -> bytes:
+def build_commit_offset_payload(topic_id: int, consumer_id: int, offset: int) -> bytes:
     """Build CommitOffset request payload (20 bytes)."""
     return struct.pack("<IQQ", topic_id, consumer_id, offset)
 
 
-def build_set_retention_payload(
-    topic_id: int, max_age_secs: int, max_bytes: int
-) -> bytes:
+def build_set_retention_payload(topic_id: int, max_age_secs: int, max_bytes: int) -> bytes:
     """Build SetRetention request payload (20 bytes)."""
     return struct.pack("<IQQ", topic_id, max_age_secs, max_bytes)
 
@@ -324,7 +317,11 @@ def build_create_topic_with_retention_payload(
 ) -> bytes:
     """Build CreateTopicWithRetention request payload."""
     name_bytes = name.encode("utf-8")
-    return struct.pack("<H", len(name_bytes)) + name_bytes + struct.pack("<QQ", max_age_secs, max_bytes)
+    return (
+        struct.pack("<H", len(name_bytes))
+        + name_bytes
+        + struct.pack("<QQ", max_age_secs, max_bytes)
+    )
 
 
 # --- Response parsers ---

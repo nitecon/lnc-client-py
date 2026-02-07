@@ -5,25 +5,25 @@ import struct
 import crc32c
 import pytest
 
+from lnc_client.errors import InvalidFrameError
 from lnc_client.protocol import (
     HEADER_SIZE,
     MAGIC,
     PROTOCOL_VERSION,
-    Flag,
     ControlCommand,
+    Flag,
     LwpHeader,
+    build_commit_offset_payload,
+    build_control_frame,
+    build_create_topic_with_retention_payload,
+    build_fetch_payload,
     build_ingest_frame,
     build_keepalive_frame,
-    build_control_frame,
-    build_fetch_payload,
+    build_set_retention_payload,
     build_subscribe_payload,
     build_unsubscribe_payload,
-    build_commit_offset_payload,
-    build_set_retention_payload,
-    build_create_topic_with_retention_payload,
     parse_fetch_response,
 )
-from lnc_client.errors import InvalidFrameError
 
 
 class TestLwpHeader:
@@ -165,9 +165,7 @@ class TestControlFrame:
     """Test control frame building."""
 
     def test_create_topic(self):
-        frame = build_control_frame(
-            ControlCommand.CREATE_TOPIC, b"my-events"
-        )
+        frame = build_control_frame(ControlCommand.CREATE_TOPIC, b"my-events")
         hdr = LwpHeader.decode(frame[:HEADER_SIZE])
         assert hdr.is_control
         assert hdr.command == ControlCommand.CREATE_TOPIC
@@ -204,15 +202,11 @@ class TestControlPayloads:
         assert len(payload) == 12
 
     def test_commit_offset_payload(self):
-        payload = build_commit_offset_payload(
-            topic_id=1, consumer_id=42, offset=5000
-        )
+        payload = build_commit_offset_payload(topic_id=1, consumer_id=42, offset=5000)
         assert len(payload) == 20
 
     def test_set_retention_payload(self):
-        payload = build_set_retention_payload(
-            topic_id=1, max_age_secs=86400, max_bytes=1073741824
-        )
+        payload = build_set_retention_payload(topic_id=1, max_age_secs=86400, max_bytes=1073741824)
         assert len(payload) == 20
         tid, age, mb = struct.unpack("<IQQ", payload)
         assert tid == 1

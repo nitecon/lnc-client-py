@@ -22,19 +22,17 @@ Example::
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from lnc_client.config import StandaloneConfig
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import ConnectionError, LanceError
 from lnc_client.protocol import (
     ControlCommand,
+    build_commit_offset_payload,
     build_control_frame,
     build_fetch_payload,
-    build_commit_offset_payload,
     parse_fetch_response,
 )
 from lnc_client.tlv import TlvRecord, decode_records
@@ -84,7 +82,7 @@ class StandaloneConsumer:
         cls,
         address: str,
         config: StandaloneConfig,
-    ) -> "StandaloneConsumer":
+    ) -> StandaloneConsumer:
         """Connect to a Lance server and create a StandaloneConsumer.
 
         Args:
@@ -150,10 +148,8 @@ class StandaloneConsumer:
 
         # Read response
         try:
-            header, payload = await self._conn.recv_frame(
-                timeout=timeout or 5.0
-            )
-        except Exception as e:
+            header, payload = await self._conn.recv_frame(timeout=timeout or 5.0)
+        except Exception:
             if self._closed:
                 return None
             raise

@@ -33,29 +33,29 @@ Example usage::
     asyncio.run(main())
 """
 
-from lnc_client.protocol import (
-    MAGIC,
-    HEADER_SIZE,
-    PROTOCOL_VERSION,
-    DEFAULT_PORT,
-    Flag,
-    ControlCommand,
-    LwpHeader,
-)
-from lnc_client.tlv import RecordType, TlvRecord, encode_records, decode_records
+from lnc_client.client import LanceClient
+from lnc_client.config import ClientConfig, ProducerConfig, StandaloneConfig
+from lnc_client.consumer import PollResult, StandaloneConsumer
 from lnc_client.errors import (
-    LanceError,
+    BackpressureError,
     ConnectionError,
+    InvalidFrameError,
+    LanceError,
     ProtocolError,
     TimeoutError,
-    BackpressureError,
     TopicNotFoundError,
-    InvalidFrameError,
 )
-from lnc_client.config import ClientConfig, ProducerConfig, StandaloneConfig
-from lnc_client.client import LanceClient
 from lnc_client.producer import Producer
-from lnc_client.consumer import StandaloneConsumer, PollResult
+from lnc_client.protocol import (
+    DEFAULT_PORT,
+    HEADER_SIZE,
+    MAGIC,
+    PROTOCOL_VERSION,
+    ControlCommand,
+    Flag,
+    LwpHeader,
+)
+from lnc_client.tlv import RecordType, TlvRecord, decode_records, encode_records
 
 __version__ = "0.1.0"
 

@@ -24,8 +24,8 @@ from lnc_client.errors import LanceError, error_from_response
 from lnc_client.protocol import (
     ControlCommand,
     build_control_frame,
-    build_set_retention_payload,
     build_create_topic_with_retention_payload,
+    build_set_retention_payload,
 )
 
 log = logging.getLogger("lnc_client.client")
@@ -44,7 +44,7 @@ class LanceClient:
             ssl_context=self._config.ssl_context,
         )
 
-    async def connect(self) -> "LanceClient":
+    async def connect(self) -> LanceClient:
         """Connect to the Lance server."""
         await self._conn.connect()
         return self
@@ -53,7 +53,7 @@ class LanceClient:
         """Close the connection."""
         await self._conn.close()
 
-    async def __aenter__(self) -> "LanceClient":
+    async def __aenter__(self) -> LanceClient:
         await self.connect()
         return self
 
@@ -118,12 +118,8 @@ class LanceClient:
         max_bytes: int = 0,
     ) -> dict[str, Any]:
         """Create a topic with retention policy in a single operation."""
-        payload = build_create_topic_with_retention_payload(
-            name, max_age_secs, max_bytes
-        )
-        frame = build_control_frame(
-            ControlCommand.CREATE_TOPIC_WITH_RETENTION, payload
-        )
+        payload = build_create_topic_with_retention_payload(name, max_age_secs, max_bytes)
+        frame = build_control_frame(ControlCommand.CREATE_TOPIC_WITH_RETENTION, payload)
         await self._conn.send_frame(frame)
         return await self._recv_topic_response()
 
@@ -131,9 +127,7 @@ class LanceClient:
 
     async def _recv_topic_response(self) -> Any:
         """Wait for a TopicResponse or ErrorResponse control frame."""
-        header, payload = await self._conn.recv_frame(
-            timeout=self._config.request_timeout_s
-        )
+        header, payload = await self._conn.recv_frame(timeout=self._config.request_timeout_s)
 
         if not header.is_control:
             raise LanceError(f"Expected control frame, got flags={header.flags:#x}")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import ssl
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(slots=True)
@@ -34,11 +34,11 @@ class ProducerConfig:
     keepalive_interval_s: float = 10.0
     ssl_context: ssl.SSLContext | None = None
 
-    def with_batch_size(self, size: int) -> "ProducerConfig":
+    def with_batch_size(self, size: int) -> ProducerConfig:
         self.batch_size = size
         return self
 
-    def with_linger_ms(self, ms: int) -> "ProducerConfig":
+    def with_linger_ms(self, ms: int) -> ProducerConfig:
         self.linger_ms = ms
         return self
 
@@ -69,7 +69,7 @@ class StandaloneConfig:
         self.connect_timeout_s = kwargs.get("connect_timeout_s", 10.0)
         self.keepalive_interval_s = kwargs.get("keepalive_interval_s", 10.0)
         self.poll_interval_ms = kwargs.get("poll_interval_ms", 50)
-        self.ssl_context = kwargs.get("ssl_context", None)
+        self.ssl_context = kwargs.get("ssl_context")
 
 
 @dataclass(slots=True)
@@ -86,7 +86,7 @@ class ReconnectConfig:
         import random
 
         delay_ms = min(
-            self.base_delay_ms * (2 ** attempt),
+            self.base_delay_ms * (2**attempt),
             self.max_delay_ms,
         )
         jitter = random.uniform(0, delay_ms * self.jitter_factor)

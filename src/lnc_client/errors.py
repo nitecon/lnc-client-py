@@ -56,27 +56,27 @@ class AccessDeniedError(LanceError):
 
 # Map server error codes to exception classes
 ERROR_CODE_MAP: dict[int, type[LanceError]] = {
-    0x01: LanceError,            # UnknownError
-    0x02: InvalidFrameError,     # InvalidMagic
-    0x03: ProtocolError,         # PayloadTooLarge
-    0x04: ProtocolError,         # InvalidPayload
-    0x05: InvalidFrameError,     # CrcMismatch
-    0x06: ProtocolError,         # VersionMismatch
-    0x10: TopicNotFoundError,    # TopicNotFound
+    0x01: LanceError,  # UnknownError
+    0x02: InvalidFrameError,  # InvalidMagic
+    0x03: ProtocolError,  # PayloadTooLarge
+    0x04: ProtocolError,  # InvalidPayload
+    0x05: InvalidFrameError,  # CrcMismatch
+    0x06: ProtocolError,  # VersionMismatch
+    0x10: TopicNotFoundError,  # TopicNotFound
     0x11: TopicAlreadyExistsError,
-    0x12: LanceError,            # InvalidTopicName
-    0x13: TopicNotFoundError,    # TopicDeleted
-    0x20: NotLeaderError,        # NotLeader
-    0x30: BackpressureError,     # RateLimited
-    0x31: BackpressureError,     # Backpressure
-    0x40: AccessDeniedError,     # AuthenticationRequired
-    0x41: AccessDeniedError,     # AuthenticationFailed
-    0x42: AccessDeniedError,     # AccessDenied
-    0x50: LanceError,            # InvalidOffset
-    0x51: LanceError,            # OffsetOutOfRange
-    0x60: LanceError,            # InternalError
-    0x61: LanceError,            # StorageError
-    0x62: TimeoutError,          # TimeoutError
+    0x12: LanceError,  # InvalidTopicName
+    0x13: TopicNotFoundError,  # TopicDeleted
+    0x20: NotLeaderError,  # NotLeader
+    0x30: BackpressureError,  # RateLimited
+    0x31: BackpressureError,  # Backpressure
+    0x40: AccessDeniedError,  # AuthenticationRequired
+    0x41: AccessDeniedError,  # AuthenticationFailed
+    0x42: AccessDeniedError,  # AccessDenied
+    0x50: LanceError,  # InvalidOffset
+    0x51: LanceError,  # OffsetOutOfRange
+    0x60: LanceError,  # InternalError
+    0x61: LanceError,  # StorageError
+    0x62: TimeoutError,  # TimeoutError
 }
 
 

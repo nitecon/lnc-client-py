@@ -2,13 +2,11 @@
 
 import struct
 
-import pytest
-
 from lnc_client.tlv import (
     RecordType,
     TlvRecord,
-    encode_records,
     decode_records,
+    encode_records,
 )
 
 
@@ -71,10 +69,7 @@ class TestEncodeDecodeRoundtrip:
 
         # Expected: 01 05000000 68656C6C6F 01 05000000 776F726C64
         assert len(payload) == 20
-        assert payload == (
-            b"\x01\x05\x00\x00\x00hello"
-            b"\x01\x05\x00\x00\x00world"
-        )
+        assert payload == (b"\x01\x05\x00\x00\x00hello\x01\x05\x00\x00\x00world")
 
     def test_roundtrip_single(self):
         original = TlvRecord.raw(b"single record")
@@ -96,7 +91,7 @@ class TestEncodeDecodeRoundtrip:
         decoded = decode_records(payload)
 
         assert len(decoded) == len(originals)
-        for orig, dec in zip(originals, decoded):
+        for orig, dec in zip(originals, decoded, strict=True):
             assert dec.record_type == orig.record_type
             assert dec.value == orig.value
 

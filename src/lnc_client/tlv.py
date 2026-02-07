@@ -53,30 +53,30 @@ class TlvRecord:
         return _TLV_HDR_FMT.pack(self.record_type, len(self.value)) + self.value
 
     @classmethod
-    def raw(cls, data: bytes) -> "TlvRecord":
+    def raw(cls, data: bytes) -> TlvRecord:
         """Create a RawData record."""
         return cls(record_type=RecordType.RAW_DATA, value=data)
 
     @classmethod
-    def json(cls, data: bytes) -> "TlvRecord":
+    def json(cls, data: bytes) -> TlvRecord:
         """Create a JSON record from already-encoded JSON bytes."""
         return cls(record_type=RecordType.JSON, value=data)
 
     @classmethod
-    def key_value(cls, key: str, value: bytes) -> "TlvRecord":
+    def key_value(cls, key: str, value: bytes) -> TlvRecord:
         """Create a KeyValue record."""
         key_bytes = key.encode("utf-8")
         payload = struct.pack("<H", len(key_bytes)) + key_bytes + value
         return cls(record_type=RecordType.KEY_VALUE, value=payload)
 
     @classmethod
-    def timestamped(cls, timestamp_ns: int, data: bytes) -> "TlvRecord":
+    def timestamped(cls, timestamp_ns: int, data: bytes) -> TlvRecord:
         """Create a Timestamped record."""
         payload = struct.pack("<Q", timestamp_ns) + data
         return cls(record_type=RecordType.TIMESTAMPED, value=payload)
 
     @classmethod
-    def null(cls) -> "TlvRecord":
+    def null(cls) -> TlvRecord:
         """Create a Null/tombstone record."""
         return cls(record_type=RecordType.NULL, value=b"")
 

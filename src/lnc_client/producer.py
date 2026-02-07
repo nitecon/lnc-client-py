@@ -15,23 +15,17 @@ Example::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-import struct
-import time
-
-import crc32c
 
 from lnc_client.config import ProducerConfig
 from lnc_client.connection import LwpConnection
-from lnc_client.errors import BackpressureError, ConnectionError, LanceError
+from lnc_client.errors import ConnectionError, LanceError
 from lnc_client.protocol import (
-    HEADER_SIZE,
     ControlCommand,
-    Flag,
-    LwpHeader,
     build_ingest_frame,
 )
-from lnc_client.tlv import TlvRecord, RecordType, encode_records
+from lnc_client.tlv import RecordType, TlvRecord, encode_records
 
 log = logging.getLogger("lnc_client.producer")
 
@@ -52,7 +46,7 @@ class Producer:
         cls,
         address: str,
         config: ProducerConfig | None = None,
-    ) -> "Producer":
+    ) -> Producer:
         """Connect to a Lance server and create a Producer.
 
         Args:
@@ -83,10 +77,8 @@ class Producer:
         self._closed = True
         if self._ack_reader_task:
             self._ack_reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._ack_reader_task
-            except asyncio.CancelledError:
-                pass
         # Fail any remaining pending acks
         for fut in self._pending_acks.values():
             if not fut.done():
@@ -125,6 +117,7 @@ class Producer:
         compressed = False
         if self._config.compression:
             import lz4.block
+
             compressed_payload = lz4.block.compress(payload, store_size=False)
             if len(compressed_payload) < len(payload):
                 payload = compressed_payload
@@ -168,6 +161,7 @@ class Producer:
         compressed = False
         if self._config.compression:
             import lz4.block
+
             compressed_payload = lz4.block.compress(payload, store_size=False)
             if len(compressed_payload) < len(payload):
                 payload = compressed_payload
@@ -202,9 +196,9 @@ class Producer:
 
         try:
             await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as e:
             self._pending_acks.pop(batch_id, None)
-            raise LanceError(f"ACK timeout for batch {batch_id}")
+            raise LanceError(f"ACK timeout for batch {batch_id}") from e
 
     async def _ack_reader_loop(self) -> None:
         """Background task that reads ACK frames and resolves pending futures."""

@@ -329,17 +329,14 @@ def build_create_topic_with_retention_payload(
 def parse_fetch_response(payload: bytes) -> tuple[int, int, int, bytes]:
     """Parse a FetchResponse payload.
 
+    Server wire format (16-byte header):
+        next_offset(8) + bytes_returned(4) + record_count(4) + data...
+
     Returns:
         (start_offset, end_offset, high_water_mark, data)
     """
-    if len(payload) < 24:
-        # Fallback to basic format: next_offset(8) + bytes_returned(4) + record_count(4) + data
-        if len(payload) < 16:
-            return (0, 0, 0, b"")
-        next_off, bytes_ret, rec_count = struct.unpack_from("<QII", payload)
-        data = payload[16 : 16 + bytes_ret]
-        return (0, next_off, next_off, data)
-
-    start_off, end_off, hwm = struct.unpack_from("<QQQ", payload)
-    data = payload[24:]
-    return (start_off, end_off, hwm, data)
+    if len(payload) < 16:
+        return (0, 0, 0, b"")
+    next_off, bytes_ret, rec_count = struct.unpack_from("<QII", payload)
+    data = payload[16 : 16 + bytes_ret]
+    return (0, next_off, next_off, data)

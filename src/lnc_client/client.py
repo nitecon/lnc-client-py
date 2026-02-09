@@ -23,9 +23,13 @@ from lnc_client.connection import LwpConnection
 from lnc_client.errors import LanceError, error_from_response
 from lnc_client.protocol import (
     ControlCommand,
+    build_commit_offset_payload,
     build_control_frame,
     build_create_topic_with_retention_payload,
+    build_keepalive_frame,
     build_set_retention_payload,
+    build_subscribe_payload,
+    build_unsubscribe_payload,
 )
 
 log = logging.getLogger("lnc_client.client")
@@ -120,6 +124,61 @@ class LanceClient:
         """Create a topic with retention policy in a single operation."""
         payload = build_create_topic_with_retention_payload(name, max_age_secs, max_bytes)
         frame = build_control_frame(ControlCommand.CREATE_TOPIC_WITH_RETENTION, payload)
+        await self._conn.send_frame(frame)
+        return await self._recv_topic_response()
+
+    # ----- diagnostics -----
+
+    async def ping(self) -> float:
+        """Ping the server and measure round-trip latency.
+
+        Returns latency in seconds.
+        """
+        import time
+
+        start = time.monotonic()
+        await self._conn.send_frame(build_keepalive_frame())
+        await self._conn.recv_header(timeout=self._config.request_timeout_s)
+        return time.monotonic() - start
+
+    # ----- subscribe / unsubscribe -----
+
+    async def subscribe(
+        self,
+        topic_id: int,
+        start_offset: int,
+        max_batch_bytes: int,
+        consumer_id: int,
+    ) -> dict[str, Any]:
+        """Subscribe to a topic for streaming consumption.
+
+        Args:
+            topic_id: Topic to subscribe to.
+            start_offset: Byte offset to start from.
+            max_batch_bytes: Maximum bytes per server push.
+            consumer_id: Numeric consumer identifier.
+        """
+        payload = build_subscribe_payload(topic_id, start_offset, max_batch_bytes, consumer_id)
+        frame = build_control_frame(ControlCommand.SUBSCRIBE, payload)
+        await self._conn.send_frame(frame)
+        return await self._recv_topic_response()
+
+    async def unsubscribe(self, topic_id: int, consumer_id: int) -> None:
+        """Unsubscribe from a topic."""
+        payload = build_unsubscribe_payload(topic_id, consumer_id)
+        frame = build_control_frame(ControlCommand.UNSUBSCRIBE, payload)
+        await self._conn.send_frame(frame)
+        await self._recv_topic_response()
+
+    async def commit_offset(
+        self,
+        topic_id: int,
+        consumer_id: int,
+        offset: int,
+    ) -> dict[str, Any]:
+        """Commit consumer offset for checkpointing."""
+        payload = build_commit_offset_payload(topic_id, consumer_id, offset)
+        frame = build_control_frame(ControlCommand.COMMIT_OFFSET, payload)
         await self._conn.send_frame(frame)
         return await self._recv_topic_response()
 

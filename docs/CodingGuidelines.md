@@ -6,14 +6,15 @@
 
 - [1. The Golden Rules](#1-the-golden-rules)
 - [2. Project Structure](#2-project-structure)
-- [3. Async Patterns](#3-async-patterns)
-- [4. Protocol Correctness](#4-protocol-correctness)
-- [5. Error Handling](#5-error-handling)
-- [6. Connection Management](#6-connection-management)
-- [7. Performance](#7-performance)
-- [8. Code Style & Idioms](#8-code-style--idioms)
-- [9. Testing](#9-testing)
-- [10. CI/CD & Review Gates](#10-cicd--review-gates)
+- [3. API Parity with Rust Client](#3-api-parity-with-rust-client)
+- [4. Async Patterns](#4-async-patterns)
+- [5. Protocol Correctness](#5-protocol-correctness)
+- [6. Error Handling](#6-error-handling)
+- [7. Connection Management](#7-connection-management)
+- [8. Performance](#8-performance)
+- [9. Code Style & Idioms](#9-code-style--idioms)
+- [10. Testing](#10-testing)
+- [11. CI/CD & Review Gates](#11-cicd--review-gates)
 - [Quick Reference Card](#quick-reference-card)
 
 **Revision**: 2026.02 | **Status**: Mandatory | **Scope**: All Contributors
@@ -50,8 +51,16 @@ lnc-client-py/
 │   ├── protocol.py          # LWP frame encoding/decoding
 │   ├── tlv.py               # TLV (Type-Length-Value) serialization
 │   ├── config.py            # Configuration dataclasses
-│   └── errors.py            # Exception hierarchy
-├── tests/                   # pytest + pytest-asyncio tests
+│   ├── errors.py            # Exception hierarchy
+│   └── offset.py            # Offset persistence (FileOffsetStore, MemoryOffsetStore)
+├── tests/
+│   ├── test_protocol.py     # Header, CRC, frame builder tests
+│   ├── test_tlv.py          # TLV encode/decode roundtrip tests
+│   ├── test_errors.py       # Exception hierarchy + is_retryable()
+│   ├── test_config.py       # Config builders, SeekPosition
+│   ├── test_offset.py       # Offset store backends
+│   └── test_integrity.py    # Live server integration tests (LANCE_TEST_ADDR)
+├── run-integrity-tests.sh   # CLI runner for integration tests
 ├── pyproject.toml           # Build config, dependencies, ruff/pytest settings
 └── docs/
     └── CodingGuidelines.md  # This file
@@ -71,9 +80,44 @@ lnc-client-py/
 
 ---
 
-## 3. Async Patterns
+## 3. API Parity with Rust Client
 
-### 3.1 All I/O Is Async
+The Python client must maintain semantic parity with the Rust `lnc-client` crate. When the Rust API changes, the Python client must be updated to match.
+
+### 3.1 Naming Conventions
+
+| Rust | Python | Notes |
+|------|--------|-------|
+| `Producer::connect()` | `Producer.connect()` | `@classmethod` |
+| `StandaloneConsumer::connect()` | `StandaloneConsumer.connect()` | `@classmethod` |
+| `LanceClient::connect()` | `LanceClient(config)` + `async with` | Context manager pattern |
+| `ProducerConfig::new().with_batch_size(n)` | `ProducerConfig().with_batch_size(n)` | Builder pattern |
+| `SeekPosition::Beginning` | `SeekPosition.BEGINNING` | Enum |
+| `ClientError::NotLeader { leader_addr }` | `NotLeaderError(leader_addr=...)` | Exception attr |
+| `error.is_retryable()` | `error.is_retryable()` | Method on base `LanceError` |
+
+### 3.2 Features Requiring Parity
+
+- Topic management (create, delete, list, get, set_retention, create_topic_with_retention)
+- Producer (connect, send, send_async, send_batch, flush, close)
+- StandaloneConsumer (connect, poll, seek, seek_to, rewind, seek_to_end, commit, close)
+- Offset persistence (OffsetStore, FileOffsetStore, MemoryOffsetStore)
+- Error hierarchy with `is_retryable()`
+- CATCHING_UP protocol (5s backoff, 3 retries)
+- Ping (latency measurement)
+- Subscribe/unsubscribe on LanceClient
+
+### 3.3 Deferred Features (Tracked Separately)
+
+- GroupCoordinator / GroupedConsumer
+- ConnectionPool
+- ClusterClient (cluster discovery)
+
+---
+
+## 4. Async Patterns
+
+### 4.1 All I/O Is Async
 
 Every function that performs network I/O must be `async`:
 
@@ -88,7 +132,7 @@ def send_frame(self, frame: bytes) -> None:
     self._socket.sendall(frame)  # BLOCKS EVENT LOOP
 ```
 
-### 3.2 Cancellation Safety
+### 4.2 Cancellation Safety
 
 All async operations must be cancellation-safe:
 
@@ -108,7 +152,7 @@ except Exception:  # Catches CancelledError!
     pass
 ```
 
-### 3.3 Timeouts
+### 4.3 Timeouts
 
 All network operations must have timeouts:
 
@@ -122,9 +166,9 @@ response = await self._read_response()
 
 ---
 
-## 4. Protocol Correctness
+## 5. Protocol Correctness
 
-### 4.1 LWP Frame Encoding
+### 5.1 LWP Frame Encoding
 
 The Lance Wire Protocol (LWP) uses a fixed-size header. All frame encoding/decoding must:
 
@@ -142,11 +186,11 @@ assert len(header) == HEADER_SIZE
 header = magic + version.to_bytes(1, "big") + ...  # FRAGILE
 ```
 
-### 4.2 TLV Encoding
+### 5.2 TLV Encoding
 
 TLV fields must be encoded/decoded via `tlv.py` helpers. Never hand-roll TLV serialization inline.
 
-### 4.3 Byte Buffers
+### 5.3 Byte Buffers
 
 - Use `bytes` for immutable payloads, `bytearray` for mutable construction
 - Use `memoryview` for zero-copy slicing when parsing frames
@@ -154,9 +198,9 @@ TLV fields must be encoded/decoded via `tlv.py` helpers. Never hand-roll TLV ser
 
 ---
 
-## 5. Error Handling
+## 6. Error Handling
 
-### 5.1 Exception Hierarchy
+### 6.1 Exception Hierarchy
 
 All client exceptions must inherit from a base `LanceClientError`:
 
@@ -168,7 +212,7 @@ class TimeoutError(LanceClientError): ...
 class TopicNotFoundError(LanceClientError): ...
 ```
 
-### 5.2 Error Patterns
+### 6.2 Error Patterns
 
 ```python
 # ✅ CORRECT: Typed exception with context
@@ -188,22 +232,22 @@ except Exception:
 
 ---
 
-## 6. Connection Management
+## 7. Connection Management
 
-### 6.1 Reconnection
+### 7.1 Reconnection
 
 - Implement exponential backoff with jitter for reconnection attempts
 - Log every reconnection attempt at `WARNING` level
 - Emit metrics (if available) for connection state changes
 - Set a maximum retry count or timeout, then raise `ConnectionError`
 
-### 6.2 Graceful Shutdown
+### 7.2 Graceful Shutdown
 
 - Send a disconnect frame before closing the socket
 - Cancel all pending reads/writes
 - Close the `asyncio.StreamWriter` properly (`writer.close(); await writer.wait_closed()`)
 
-### 6.3 Resource Cleanup
+### 7.3 Resource Cleanup
 
 All connection-holding classes must support async context managers:
 
@@ -216,9 +260,9 @@ async with Producer(host, port, topic) as producer:
 
 ---
 
-## 7. Performance
+## 8. Performance
 
-### 7.1 Batching
+### 8.1 Batching
 
 When sending multiple messages, batch them into a single write where the protocol allows:
 
@@ -234,13 +278,13 @@ for msg in messages:
     await self._writer.drain()  # Flush per message = slow
 ```
 
-### 7.2 Buffer Management
+### 8.2 Buffer Management
 
 - Pre-allocate read buffers where possible
 - Use `memoryview` for zero-copy slicing during frame parsing
 - Avoid creating intermediate `bytes` objects in hot loops
 
-### 7.3 Compression
+### 8.3 Compression
 
 - LZ4 compression is supported via the `lz4` dependency
 - Compression should be configurable, not mandatory
@@ -248,16 +292,16 @@ for msg in messages:
 
 ---
 
-## 8. Code Style & Idioms
+## 9. Code Style & Idioms
 
-### 8.1 Tooling
+### 9.1 Tooling
 
 | Tool | Config | Purpose |
 |------|--------|---------|
 | **Ruff** | `pyproject.toml` `[tool.ruff]` | Linting + formatting |
 | **pytest** | `pyproject.toml` `[tool.pytest]` | Testing |
 
-### 8.2 Ruff Configuration
+### 9.2 Ruff Configuration
 
 ```toml
 [tool.ruff]
@@ -272,7 +316,7 @@ ignore = ["E501"]
 quote-style = "double"
 ```
 
-### 8.3 Naming Conventions
+### 9.3 Naming Conventions
 
 | Item | Convention | Example |
 |------|-----------|---------|
@@ -282,7 +326,7 @@ quote-style = "double"
 | Constants | `SCREAMING_SNAKE` | `HEADER_SIZE`, `MAGIC` |
 | Private members | `_leading_underscore` | `self._writer`, `self._buffer` |
 
-### 8.4 Docstrings
+### 9.4 Docstrings
 
 All public classes and functions must have Google-style docstrings:
 
@@ -300,7 +344,7 @@ async def send(self, payload: bytes, *, compress: bool = False) -> None:
     """
 ```
 
-### 8.5 Type Hints
+### 9.5 Type Hints
 
 All public API signatures must include type hints:
 
@@ -314,9 +358,9 @@ async def connect(self, host, port, timeout=30.0): ...
 
 ---
 
-## 9. Testing
+## 10. Testing
 
-### 9.1 Test Strategy
+### 10.1 Test Strategy
 
 | Layer | Test Type | Notes |
 |-------|----------|-------|
@@ -325,7 +369,7 @@ async def connect(self, host, port, timeout=30.0): ...
 | `producer.py` / `consumer.py` | Integration tests | Require running Lance (mark `@pytest.mark.integration`) |
 | `client.py` | Integration tests | Topic create/delete/list against Lance |
 
-### 9.2 Test Rules
+### 10.2 Test Rules
 
 - Tests use `pytest-asyncio` with `asyncio_mode = "auto"`
 - Unit tests must not require network access
@@ -333,7 +377,7 @@ async def connect(self, host, port, timeout=30.0): ...
 - All protocol encoding must have a corresponding decode test (round-trip)
 - Edge cases: empty payloads, maximum-size frames, malformed headers
 
-### 9.3 Validation Before Commit
+### 10.3 Validation Before Commit
 
 ```bash
 ruff check .
@@ -343,9 +387,9 @@ pytest
 
 ---
 
-## 10. CI/CD & Review Gates
+## 11. CI/CD & Review Gates
 
-### 10.1 Pre-Merge Checks
+### 11.1 Pre-Merge Checks
 
 | Check | Command | Purpose |
 |-------|---------|---------|
@@ -353,7 +397,7 @@ pytest
 | **Format** | `ruff format --check .` | Consistent formatting |
 | **Test** | `pytest` | All unit tests pass |
 
-### 10.2 Human Review Checklist
+### 11.2 Human Review Checklist
 
 Before approving any PR:
 

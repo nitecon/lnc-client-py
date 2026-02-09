@@ -6,9 +6,20 @@ from __future__ import annotations
 class LanceError(Exception):
     """Base exception for all Lance client errors."""
 
+    def is_retryable(self) -> bool:
+        """Whether this error is transient and the operation can be retried.
+
+        Retryable errors: ConnectionError, TimeoutError, BackpressureError,
+        ServerCatchingUpError, NotLeaderError.
+        """
+        return False
+
 
 class ConnectionError(LanceError):
     """Connection-level errors (refused, closed, DNS failure)."""
+
+    def is_retryable(self) -> bool:
+        return True
 
 
 class ProtocolError(LanceError):
@@ -22,9 +33,26 @@ class InvalidFrameError(ProtocolError):
 class TimeoutError(LanceError):
     """Operation exceeded deadline."""
 
+    def is_retryable(self) -> bool:
+        return True
+
 
 class BackpressureError(LanceError):
     """Server requested slowdown."""
+
+    def is_retryable(self) -> bool:
+        return True
+
+
+class ServerCatchingUpError(LanceError):
+    """Server has not yet replicated to the requested offset — backoff and retry."""
+
+    def __init__(self, server_offset: int = 0) -> None:
+        super().__init__(f"Server catching up (at offset {server_offset})")
+        self.server_offset = server_offset
+
+    def is_retryable(self) -> bool:
+        return True
 
 
 class TopicNotFoundError(LanceError):
@@ -49,6 +77,9 @@ class NotLeaderError(LanceError):
         super().__init__(msg)
         self.leader_addr = leader_addr
 
+    def is_retryable(self) -> bool:
+        return True
+
 
 class AccessDeniedError(LanceError):
     """Client not authorized for requested operation."""
@@ -66,6 +97,7 @@ ERROR_CODE_MAP: dict[int, type[LanceError]] = {
     0x11: TopicAlreadyExistsError,
     0x12: LanceError,  # InvalidTopicName
     0x13: TopicNotFoundError,  # TopicDeleted
+    0x14: ServerCatchingUpError,  # ServerCatchingUp
     0x20: NotLeaderError,  # NotLeader
     0x30: BackpressureError,  # RateLimited
     0x31: BackpressureError,  # Backpressure
@@ -89,5 +121,8 @@ def error_from_response(code: int, message: str, details: dict | None = None) ->
         return NotLeaderError(leader)
     if exc_class is TopicNotFoundError:
         return TopicNotFoundError(message)
+    if exc_class is ServerCatchingUpError:
+        offset = details.get("server_offset", 0) if details else 0
+        return ServerCatchingUpError(offset)
 
     return exc_class(message)

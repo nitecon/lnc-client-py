@@ -8,18 +8,20 @@ Example usage::
 
     import asyncio
     from lnc_client import LanceClient, ClientConfig, Producer, ProducerConfig
-    from lnc_client import StandaloneConsumer, StandaloneConfig
+    from lnc_client import StandaloneConsumer, StandaloneConfig, SeekPosition
 
     async def main():
         # Management client
         cfg = ClientConfig(host="127.0.0.1", port=1992)
         async with LanceClient(cfg) as client:
+            topic = await client.create_topic("my-events")
             topics = await client.list_topics()
             print(topics)
 
         # Producer
         prod = await Producer.connect("127.0.0.1:1992", ProducerConfig())
         await prod.send(topic_id=1, data=b'hello world')
+        await prod.flush()
         await prod.close()
 
         # Consumer
@@ -28,23 +30,35 @@ Example usage::
             StandaloneConfig(consumer_name="my-consumer", topic_id=1),
         )
         records = await cons.poll()
+        await cons.commit()
         await cons.close()
 
     asyncio.run(main())
 """
 
 from lnc_client.client import LanceClient
-from lnc_client.config import ClientConfig, ProducerConfig, StandaloneConfig
+from lnc_client.config import (
+    ClientConfig,
+    ProducerConfig,
+    ReconnectConfig,
+    SeekPosition,
+    StandaloneConfig,
+)
 from lnc_client.consumer import PollResult, StandaloneConsumer
 from lnc_client.errors import (
+    AccessDeniedError,
     BackpressureError,
     ConnectionError,
     InvalidFrameError,
     LanceError,
+    NotLeaderError,
     ProtocolError,
+    ServerCatchingUpError,
     TimeoutError,
+    TopicAlreadyExistsError,
     TopicNotFoundError,
 )
+from lnc_client.offset import FileOffsetStore, MemoryOffsetStore, OffsetStore
 from lnc_client.producer import Producer
 from lnc_client.protocol import (
     DEFAULT_PORT,
@@ -80,11 +94,17 @@ __all__ = [
     "TimeoutError",
     "BackpressureError",
     "TopicNotFoundError",
+    "TopicAlreadyExistsError",
+    "NotLeaderError",
+    "ServerCatchingUpError",
+    "AccessDeniedError",
     "InvalidFrameError",
     # Config
     "ClientConfig",
     "ProducerConfig",
     "StandaloneConfig",
+    "ReconnectConfig",
+    "SeekPosition",
     # Client
     "LanceClient",
     # Producer
@@ -92,4 +112,8 @@ __all__ = [
     # Consumer
     "StandaloneConsumer",
     "PollResult",
+    # Offset persistence
+    "OffsetStore",
+    "FileOffsetStore",
+    "MemoryOffsetStore",
 ]

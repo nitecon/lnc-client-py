@@ -223,13 +223,11 @@ class TestControlPayloads:
         assert name == "events"
 
     def test_parse_fetch_response_extended(self):
-        # Build extended format: start(8) + end(8) + hwm(8) + data
+        # Server wire format: next_offset(8) + bytes_returned(4) + record_count(4) + data
         data = b"record data here"
-        resp = struct.pack("<QQQ", 100, 200, 500) + data
+        resp = struct.pack("<QII", 200, len(data), 3) + data
         start, end, hwm, parsed_data = parse_fetch_response(resp)
-        assert start == 100
         assert end == 200
-        assert hwm == 500
         assert parsed_data == data
 
     def test_parse_fetch_response_basic(self):

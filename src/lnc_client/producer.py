@@ -186,6 +186,23 @@ class Producer:
         await self._wait_ack(batch_id)
         return batch_id
 
+    async def flush(self, timeout: float = 30.0) -> None:
+        """Wait for all pending ACKs to be resolved.
+
+        Ensures all previously sent records have been acknowledged by the server.
+        """
+        if not self._pending_acks:
+            return
+
+        pending = list(self._pending_acks.values())
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise LanceError(f"Flush timed out with {len(self._pending_acks)} pending ACKs") from e
+
     # ----- internal -----
 
     async def _wait_ack(self, batch_id: int, timeout: float = 30.0) -> None:

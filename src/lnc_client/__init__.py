@@ -4,6 +4,9 @@ High-performance, low-latency data streaming client implementing the LWP
 binary protocol with CRC32C validation, TLV record encoding, batched
 production, and offset-based consumption.
 
+Topics are addressed by **name** throughout this library.  Numeric topic IDs
+are an implementation detail of the wire protocol and are resolved internally.
+
 Example usage::
 
     import asyncio
@@ -11,23 +14,25 @@ Example usage::
     from lnc_client import StandaloneConsumer, StandaloneConfig, SeekPosition
 
     async def main():
-        # Management client
+        # Management client — name-based topic creation (idempotent)
         cfg = ClientConfig(host="127.0.0.1", port=1992)
         async with LanceClient(cfg) as client:
             topic = await client.create_topic("my-events")
             topics = await client.list_topics()
             print(topics)
 
-        # Producer
-        prod = await Producer.connect("127.0.0.1:1992", ProducerConfig())
-        await prod.send(topic_id=1, data=b'hello world')
+        # Producer — name-based (preferred)
+        prod, topic_id = await Producer.connect_for_topic(
+            "127.0.0.1:1992", "my-events", ProducerConfig()
+        )
+        await prod.send(topic_id=topic_id, data=b'hello world')
         await prod.flush()
         await prod.close()
 
-        # Consumer
+        # Consumer — name-based (preferred)
         cons = await StandaloneConsumer.connect(
             "127.0.0.1:1992",
-            StandaloneConfig(consumer_name="my-consumer", topic_id=1),
+            StandaloneConfig(consumer_name="my-consumer", topic_name="my-events"),
         )
         records = await cons.poll()
         await cons.commit()
@@ -43,6 +48,7 @@ from lnc_client.config import (
     ReconnectConfig,
     SeekPosition,
     StandaloneConfig,
+    validate_topic_name,
 )
 from lnc_client.consumer import PollResult, StandaloneConsumer
 from lnc_client.errors import (
@@ -50,6 +56,7 @@ from lnc_client.errors import (
     BackpressureError,
     ConnectionError,
     InvalidFrameError,
+    InvalidTopicNameError,
     LanceError,
     NotLeaderError,
     ProtocolError,
@@ -95,6 +102,7 @@ __all__ = [
     "BackpressureError",
     "TopicNotFoundError",
     "TopicAlreadyExistsError",
+    "InvalidTopicNameError",
     "NotLeaderError",
     "ServerCatchingUpError",
     "AccessDeniedError",
@@ -105,6 +113,7 @@ __all__ = [
     "StandaloneConfig",
     "ReconnectConfig",
     "SeekPosition",
+    "validate_topic_name",
     # Client
     "LanceClient",
     # Producer

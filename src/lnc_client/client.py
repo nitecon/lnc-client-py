@@ -8,6 +8,7 @@ Example::
 
     async with LanceClient(ClientConfig(host="10.0.10.11")) as client:
         topics = await client.list_topics()
+        # Name-based (idempotent): create if absent, return existing if present
         topic = await client.create_topic("my-events")
         await client.set_retention(topic["id"], max_age_secs=86400)
 """
@@ -18,9 +19,9 @@ import json
 import logging
 from typing import Any
 
-from lnc_client.config import ClientConfig
+from lnc_client.config import ClientConfig, validate_topic_name
 from lnc_client.connection import LwpConnection
-from lnc_client.errors import LanceError, error_from_response
+from lnc_client.errors import LanceError, TopicNotFoundError, error_from_response
 from lnc_client.protocol import (
     ControlCommand,
     build_commit_offset_payload,
@@ -67,7 +68,23 @@ class LanceClient:
     # ----- topic operations -----
 
     async def create_topic(self, name: str) -> dict[str, Any]:
-        """Create a new topic. Returns topic metadata dict."""
+        """Create a new topic, or return the existing topic if the name is already taken.
+
+        The Lance server ``CREATE_TOPIC`` command is idempotent — if a topic with
+        the given name already exists the server returns its metadata rather than
+        raising an error.  This makes ``create_topic`` safe to use for
+        name-to-ID resolution.
+
+        Args:
+            name: Topic name.  Must match ``[a-zA-Z0-9-]+``.
+
+        Returns:
+            Topic metadata dict with at least ``id`` (int) and ``name`` (str).
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+        """
+        validate_topic_name(name)
         payload = name.encode("utf-8")
         frame = build_control_frame(ControlCommand.CREATE_TOPIC, payload)
         await self._conn.send_frame(frame)
@@ -94,6 +111,29 @@ class LanceClient:
             return resp["topics"]
         return [resp] if resp else []
 
+    async def ensure_topic(self, name: str) -> dict[str, Any]:
+        """Resolve a topic name to its metadata, creating it if it does not exist.
+
+        This is the primary name-to-ID resolution helper for producers and
+        consumers.  It calls ``create_topic`` which is idempotent on the Lance
+        server: if the topic already exists the server returns existing metadata;
+        if it does not, a new topic is created.
+
+        Use this method when you want "get or create" semantics.  If you need
+        strict "must already exist" semantics, use ``list_topics`` and filter
+        manually.
+
+        Args:
+            name: Topic name.  Must match ``[a-zA-Z0-9-]+``.
+
+        Returns:
+            Topic metadata dict (same shape as ``create_topic()`` response).
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+        """
+        return await self.create_topic(name)
+
     async def get_topic(self, topic_id: int) -> dict[str, Any]:
         """Get topic metadata by ID."""
         import struct
@@ -102,6 +142,33 @@ class LanceClient:
         frame = build_control_frame(ControlCommand.GET_TOPIC, payload)
         await self._conn.send_frame(frame)
         return await self._recv_topic_response()
+
+    async def get_topic_by_name(self, name: str) -> dict[str, Any]:
+        """Look up a topic strictly by name without creating it.
+
+        Unlike ``ensure_topic``, this method never creates a new topic.  It
+        lists all topics and matches by name.  Use this when the topic *must*
+        already exist and a missing topic should be surfaced as an error.
+
+        Args:
+            name: Topic name to look up.
+
+        Returns:
+            Topic metadata dict.
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+            TopicNotFoundError: If no topic with that name exists.
+        """
+        validate_topic_name(name)
+        all_topics = await self.list_topics()
+        matched = [t for t in all_topics if t.get("name") == name]
+        if not matched:
+            available = [t.get("name", "?") for t in all_topics]
+            raise TopicNotFoundError(
+                f"Lance topic '{name}' not found. Available topics: {available}."
+            )
+        return matched[0]
 
     async def set_retention(
         self,
@@ -121,7 +188,20 @@ class LanceClient:
         max_age_secs: int = 0,
         max_bytes: int = 0,
     ) -> dict[str, Any]:
-        """Create a topic with retention policy in a single operation."""
+        """Create a topic with retention policy in a single operation.
+
+        Args:
+            name: Topic name.  Must match ``[a-zA-Z0-9-]+``.
+            max_age_secs: Maximum age in seconds (0 = no limit).
+            max_bytes: Maximum size in bytes (0 = no limit).
+
+        Returns:
+            Topic metadata dict.
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+        """
+        validate_topic_name(name)
         payload = build_create_topic_with_retention_payload(name, max_age_secs, max_bytes)
         frame = build_control_frame(ControlCommand.CREATE_TOPIC_WITH_RETENTION, payload)
         await self._conn.send_frame(frame)

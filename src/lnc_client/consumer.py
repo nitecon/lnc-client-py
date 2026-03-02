@@ -4,11 +4,11 @@ Standalone consumer uses Fetch requests to pull data from specific offsets.
 Supports seek, rewind, offset tracking, commit, CATCHING_UP handling, and
 optional file-based offset persistence.
 
-Example::
+Example (name-based, preferred)::
 
     consumer = await StandaloneConsumer.connect(
         "10.0.10.11:1992",
-        StandaloneConfig(consumer_name="my-app", topic_id=1),
+        StandaloneConfig(consumer_name="my-app", topic_name="rithmic-dev"),
     )
 
     while True:
@@ -19,6 +19,13 @@ Example::
         for record in result.records:
             process(record)
         await consumer.commit()
+
+Example (ID-based, legacy)::
+
+    consumer = await StandaloneConsumer.connect(
+        "10.0.10.11:1992",
+        StandaloneConfig(consumer_name="my-app", topic_id=1),
+    )
 """
 
 from __future__ import annotations
@@ -27,7 +34,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from lnc_client.config import SeekPosition, StandaloneConfig
+from lnc_client.config import ClientConfig, SeekPosition, StandaloneConfig
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import ConnectionError, LanceError, ServerCatchingUpError
 from lnc_client.offset import FileOffsetStore, OffsetStore
@@ -75,6 +82,11 @@ class StandaloneConsumer:
     Uses Fetch control frames to pull data from a topic at a specific offset.
     The consumer tracks its current offset and provides seek/rewind operations.
     Supports optional file-based offset persistence via ``OffsetStore``.
+
+    Topic addressing: pass ``topic_name`` in ``StandaloneConfig`` to have the
+    consumer automatically resolve the name to a numeric ID via ``create_topic``
+    (idempotent).  Passing a raw ``topic_id`` is still supported for backward
+    compatibility.
     """
 
     def __init__(
@@ -103,17 +115,43 @@ class StandaloneConsumer:
     ) -> StandaloneConsumer:
         """Connect to a Lance server and create a StandaloneConsumer.
 
+        If ``config.topic_name`` is set and ``config.topic_id`` is 0, the topic
+        name is automatically resolved to a numeric ID by calling
+        ``create_topic`` on a temporary management connection.  This call is
+        idempotent — an existing topic is returned as-is.
+
         Args:
             address: "host:port" string.
-            config: Consumer configuration.
+            config: Consumer configuration.  Set either ``topic_name`` (preferred)
+                    or ``topic_id`` (legacy).
             offset_store: Optional offset persistence backend.
                           If not provided and config.offset_dir is set, a
                           FileOffsetStore is created automatically.
+
+        Raises:
+            ValueError: If ``config.topic_name`` contains invalid characters.
+            LanceError: If the server returns an error during topic resolution.
         """
         host, _, port_str = address.rpartition(":")
         port = int(port_str) if port_str else 1992
         if not host:
             host = address
+
+        # Resolve topic_name → topic_id if needed
+        if config.topic_name and config.topic_id == 0:
+            from lnc_client.client import LanceClient
+
+            async with LanceClient(ClientConfig(host=host, port=port)) as client:
+                topic = await client.create_topic(config.topic_name)
+            resolved_id: int = topic["id"]
+            log.info(
+                "Resolved topic '%s' to id=%d for consumer '%s'",
+                config.topic_name,
+                resolved_id,
+                config.consumer_name,
+            )
+            # Patch the config so offset restore uses the resolved ID
+            config.topic_id = resolved_id
 
         conn = LwpConnection(
             host,

@@ -2,10 +2,48 @@
 
 from __future__ import annotations
 
+import re
 import ssl
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Topic name validation
+# ---------------------------------------------------------------------------
+
+_TOPIC_NAME_RE = re.compile(r"^[a-zA-Z0-9-]+$")
+
+
+def validate_topic_name(name: str) -> str:
+    """Validate a topic name and return it if valid.
+
+    Topic names must be non-empty and match the pattern ``[a-zA-Z0-9-]+``
+    (alphanumeric characters and dashes only). This constraint is enforced
+    both client-side and by the Lance server (error code 0x12).
+
+    Args:
+        name: The topic name to validate.
+
+    Returns:
+        The validated name unchanged.
+
+    Raises:
+        ValueError: If the name is empty or contains invalid characters.
+    """
+    if not name:
+        raise ValueError("Topic name must not be empty.")
+    if not _TOPIC_NAME_RE.match(name):
+        raise ValueError(
+            f"Invalid topic name: {name!r}. "
+            "Names must contain only alphanumeric characters and dashes ([a-zA-Z0-9-])."
+        )
+    return name
+
+
+# ---------------------------------------------------------------------------
+# SeekPosition
+# ---------------------------------------------------------------------------
 
 
 class SeekPosition(Enum):
@@ -24,6 +62,11 @@ class SeekPosition(Enum):
         Returns a ``("offset", value)`` tuple that config helpers accept.
         """
         return ("offset", value)
+
+
+# ---------------------------------------------------------------------------
+# ClientConfig
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -56,6 +99,11 @@ class ClientConfig:
     def with_ssl(self, ctx: ssl.SSLContext) -> ClientConfig:
         self.ssl_context = ctx
         return self
+
+
+# ---------------------------------------------------------------------------
+# ProducerConfig
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -105,12 +153,32 @@ class ProducerConfig:
         return self
 
 
+# ---------------------------------------------------------------------------
+# StandaloneConfig
+# ---------------------------------------------------------------------------
+
+
 @dataclass(slots=True)
 class StandaloneConfig:
-    """Configuration for a standalone consumer."""
+    """Configuration for a standalone consumer.
+
+    Supports both name-based and ID-based topic addressing.  The preferred
+    approach is to pass ``topic_name`` and let the consumer resolve the ID
+    automatically via ``create_topic`` (idempotent).  Passing a raw
+    ``topic_id`` is still supported for backward compatibility.
+
+    Example (name-based, preferred)::
+
+        cfg = StandaloneConfig(consumer_name="my-app", topic_name="rithmic-dev")
+
+    Example (ID-based, legacy)::
+
+        cfg = StandaloneConfig(consumer_name="my-app", topic_id=3)
+    """
 
     consumer_name: str = ""
     topic_id: int = 0
+    topic_name: str = ""
     max_fetch_bytes: int = 1_048_576
     start_position: SeekPosition | tuple[str, int] = SeekPosition.BEGINNING
     offset_dir: Path | None = None
@@ -126,10 +194,15 @@ class StandaloneConfig:
         self,
         consumer_name: str = "",
         topic_id: int = 0,
+        topic_name: str = "",
         **kwargs,
     ) -> None:
         self.consumer_name = consumer_name
         self.topic_id = topic_id
+        # Validate the topic name if provided
+        if topic_name:
+            validate_topic_name(topic_name)
+        self.topic_name = topic_name
         self.max_fetch_bytes = kwargs.get("max_fetch_bytes", 1_048_576)
         self.start_position = kwargs.get("start_position", SeekPosition.BEGINNING)
         self.offset_dir = kwargs.get("offset_dir")
@@ -190,6 +263,11 @@ class StandaloneConfig:
         if self.start_position is SeekPosition.END:
             return 2**63 - 1
         return 0
+
+
+# ---------------------------------------------------------------------------
+# ReconnectConfig
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)

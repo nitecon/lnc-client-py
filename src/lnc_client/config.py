@@ -27,6 +27,30 @@ class SeekPosition(Enum):
 
 
 @dataclass(slots=True)
+class RetentionInfo:
+    """Retention policy for a topic."""
+
+    max_age_secs: int = 0
+    max_bytes: int = 0
+
+
+@dataclass(slots=True)
+class TopicInfo:
+    """Metadata for a Lance topic.
+
+    Mirrors Rust ``lnc_client::TopicInfo``.
+    ``id`` is the u32 numeric topic ID used on the wire protocol.
+    ``name`` is the stable topic name used on disk and by the API.
+    """
+
+    id: int
+    name: str
+    created_at: int = 0
+    topic_epoch: int = 1
+    retention: RetentionInfo | None = None
+
+
+@dataclass(slots=True)
 class ClientConfig:
     """Configuration for the management LanceClient."""
 
@@ -111,6 +135,7 @@ class StandaloneConfig:
 
     consumer_name: str = ""
     topic_id: int = 0
+    topic_name: str | None = None
     max_fetch_bytes: int = 1_048_576
     start_position: SeekPosition | tuple[str, int] = SeekPosition.BEGINNING
     offset_dir: Path | None = None
@@ -130,6 +155,7 @@ class StandaloneConfig:
     ) -> None:
         self.consumer_name = consumer_name
         self.topic_id = topic_id
+        self.topic_name = kwargs.get("topic_name")
         self.max_fetch_bytes = kwargs.get("max_fetch_bytes", 1_048_576)
         self.start_position = kwargs.get("start_position", SeekPosition.BEGINNING)
         self.offset_dir = kwargs.get("offset_dir")
@@ -179,6 +205,21 @@ class StandaloneConfig:
     def with_auto_reconnect(self, enabled: bool) -> StandaloneConfig:
         self.auto_reconnect = enabled
         return self
+
+    @classmethod
+    def with_topic_name(cls, consumer_name: str, topic_name: str, **kwargs) -> StandaloneConfig:
+        """Create config using a topic name instead of a numeric ID.
+
+        The topic ID will be resolved at connect time via ``ensure_topic``.
+        """
+        return cls(consumer_name, topic_id=0, topic_name=topic_name, **kwargs)
+
+    @classmethod
+    def new_with_id(
+        cls, consumer_name: str, topic_name: str, topic_id: int, **kwargs
+    ) -> StandaloneConfig:
+        """Create config with both topic name and a known topic ID."""
+        return cls(consumer_name, topic_id=topic_id, topic_name=topic_name, **kwargs)
 
     @property
     def start_offset(self) -> int:

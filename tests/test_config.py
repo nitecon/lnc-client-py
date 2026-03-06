@@ -131,6 +131,42 @@ class TestStandaloneConfig:
         assert cfg.auto_commit_interval_s is None
 
 
+class TestStandaloneConfigTopicName:
+    """Test StandaloneConfig topic name support."""
+
+    def test_with_topic_name_classmethod(self):
+        cfg = StandaloneConfig.with_topic_name("my-consumer", "my-events")
+        assert cfg.consumer_name == "my-consumer"
+        assert cfg.topic_name == "my-events"
+        assert cfg.topic_id == 0
+
+    def test_new_with_id_classmethod(self):
+        cfg = StandaloneConfig.new_with_id("my-consumer", "my-events", 42)
+        assert cfg.consumer_name == "my-consumer"
+        assert cfg.topic_name == "my-events"
+        assert cfg.topic_id == 42
+
+    def test_topic_name_kwarg(self):
+        cfg = StandaloneConfig("c", topic_id=1, topic_name="events")
+        assert cfg.topic_name == "events"
+        assert cfg.topic_id == 1
+
+    def test_topic_name_default_none(self):
+        cfg = StandaloneConfig("c", topic_id=1)
+        assert cfg.topic_name is None
+
+    def test_with_topic_name_extra_kwargs(self):
+        cfg = StandaloneConfig.with_topic_name("c", "events", max_fetch_bytes=512 * 1024)
+        assert cfg.topic_name == "events"
+        assert cfg.max_fetch_bytes == 512 * 1024
+
+    def test_backward_compat_topic_id_only(self):
+        """Existing code using topic_id=N still works."""
+        cfg = StandaloneConfig("c", topic_id=5)
+        assert cfg.topic_id == 5
+        assert cfg.topic_name is None
+
+
 class TestReconnectConfig:
     """Test ReconnectConfig defaults and backoff calculation."""
 

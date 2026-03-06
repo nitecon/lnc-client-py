@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 
 class LanceError(Exception):
     """Base exception for all Lance client errors."""
@@ -67,6 +69,14 @@ class TopicAlreadyExistsError(LanceError):
     """Topic with specified name already exists."""
 
 
+class InvalidTopicNameError(LanceError):
+    """Topic name does not match the required pattern ``[a-zA-Z0-9-]+``."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Invalid topic name: {name!r}")
+        self.name = name
+
+
 class NotLeaderError(LanceError):
     """This node is not the cluster leader."""
 
@@ -95,7 +105,7 @@ ERROR_CODE_MAP: dict[int, type[LanceError]] = {
     0x06: ProtocolError,  # VersionMismatch
     0x10: TopicNotFoundError,  # TopicNotFound
     0x11: TopicAlreadyExistsError,
-    0x12: LanceError,  # InvalidTopicName
+    0x12: InvalidTopicNameError,  # InvalidTopicName
     0x13: TopicNotFoundError,  # TopicDeleted
     0x14: ServerCatchingUpError,  # ServerCatchingUp
     0x20: NotLeaderError,  # NotLeader
@@ -112,6 +122,18 @@ ERROR_CODE_MAP: dict[int, type[LanceError]] = {
 }
 
 
+_TOPIC_NAME_RE = re.compile(r"^[a-zA-Z0-9-]+$")
+
+
+def validate_topic_name(name: str) -> None:
+    """Validate a topic name against the ``[a-zA-Z0-9-]+`` pattern.
+
+    Raises ``InvalidTopicNameError`` if the name is invalid.
+    """
+    if not name or not _TOPIC_NAME_RE.match(name):
+        raise InvalidTopicNameError(name)
+
+
 def error_from_response(code: int, message: str, details: dict | None = None) -> LanceError:
     """Create the appropriate exception from a server error response."""
     exc_class = ERROR_CODE_MAP.get(code, LanceError)
@@ -124,5 +146,7 @@ def error_from_response(code: int, message: str, details: dict | None = None) ->
     if exc_class is ServerCatchingUpError:
         offset = details.get("server_offset", 0) if details else 0
         return ServerCatchingUpError(offset)
+    if exc_class is InvalidTopicNameError:
+        return InvalidTopicNameError(message)
 
     return exc_class(message)

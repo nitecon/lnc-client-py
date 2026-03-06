@@ -6,8 +6,8 @@ an Ingest frame and waits for server ACK. Supports optional LZ4 compression.
 Example::
 
     producer = await Producer.connect("10.0.10.11:1992", ProducerConfig())
-    await producer.send(topic_id=1, data=b'{"price": 6942.25}')
-    await producer.send_async(topic_id=1, data=b'fire and forget')
+    await producer.send(topic="my-events", data=b'{"price": 6942.25}')
+    await producer.send_async(topic="my-events", data=b'fire and forget')
     await producer.flush()
     await producer.close()
 """
@@ -17,8 +17,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import warnings
 
-from lnc_client.config import ProducerConfig
+from lnc_client.config import ClientConfig, ProducerConfig
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import ConnectionError, LanceError
 from lnc_client.protocol import (
@@ -40,6 +41,9 @@ class Producer:
         self._pending_acks: dict[int, asyncio.Future] = {}
         self._ack_reader_task: asyncio.Task | None = None
         self._closed = False
+        self._host: str = ""
+        self._port: int = 1992
+        self._topic_cache: dict[str, int] = {}
 
     @classmethod
     async def connect(
@@ -69,6 +73,8 @@ class Producer:
         await conn.connect()
 
         prod = cls(conn, cfg)
+        prod._host = host
+        prod._port = port
         prod._ack_reader_task = asyncio.create_task(prod._ack_reader_loop())
         return prod
 
@@ -88,24 +94,163 @@ class Producer:
 
     async def send(
         self,
-        topic_id: int,
-        data: bytes,
+        topic: str | int | None = None,
+        data: bytes = b"",
         *,
+        topic_id: int | None = None,
         record_type: int = RecordType.RAW_DATA,
     ) -> int:
-        """Send data and wait for server ACK. Returns batch_id."""
-        batch_id = await self.send_async(topic_id, data, record_type=record_type)
+        """Send data and wait for server ACK. Returns batch_id.
+
+        Args:
+            topic: Topic name (str) or numeric topic ID (int).
+            data: Payload bytes.
+            topic_id: Deprecated — use ``topic`` instead.
+            record_type: TLV record type.
+        """
+        resolved = await self._resolve_topic_arg(topic, topic_id)
+        batch_id = await self._send_internal(resolved, data, record_type=record_type)
         await self._wait_ack(batch_id)
         return batch_id
 
     async def send_async(
+        self,
+        topic: str | int | None = None,
+        data: bytes = b"",
+        *,
+        topic_id: int | None = None,
+        record_type: int = RecordType.RAW_DATA,
+    ) -> int:
+        """Send data without waiting for ACK (pipelined). Returns batch_id.
+
+        Args:
+            topic: Topic name (str) or numeric topic ID (int).
+            data: Payload bytes.
+            topic_id: Deprecated — use ``topic`` instead.
+            record_type: TLV record type.
+        """
+        resolved = await self._resolve_topic_arg(topic, topic_id)
+        return await self._send_internal(resolved, data, record_type=record_type)
+
+    async def send_batch(
+        self,
+        topic: str | int | None = None,
+        records: list[TlvRecord] | None = None,
+        *,
+        topic_id: int | None = None,
+    ) -> int:
+        """Send multiple TLV records as a single batch. Waits for ACK.
+
+        Args:
+            topic: Topic name (str) or numeric topic ID (int).
+            records: List of TLV records.
+            topic_id: Deprecated — use ``topic`` instead.
+        """
+        if records is None:
+            records = []
+        if self._closed:
+            raise ConnectionError("Producer is closed")
+
+        resolved = await self._resolve_topic_arg(topic, topic_id)
+        payload = encode_records(records)
+
+        compressed = False
+        if self._config.compression:
+            import lz4.block
+
+            compressed_payload = lz4.block.compress(payload, store_size=False)
+            if len(compressed_payload) < len(payload):
+                payload = compressed_payload
+                compressed = True
+
+        self._batch_id += 1
+        batch_id = self._batch_id
+
+        frame = build_ingest_frame(
+            payload=payload,
+            batch_id=batch_id,
+            record_count=len(records),
+            topic_id=resolved,
+            compressed=compressed,
+        )
+
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        self._pending_acks[batch_id] = fut
+
+        await self._conn.send_frame(frame)
+        await self._wait_ack(batch_id)
+        return batch_id
+
+    async def flush(self, timeout: float = 30.0) -> None:
+        """Wait for all pending ACKs to be resolved.
+
+        Ensures all previously sent records have been acknowledged by the server.
+        """
+        if not self._pending_acks:
+            return
+
+        pending = list(self._pending_acks.values())
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*pending, return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError as e:
+            raise LanceError(f"Flush timed out with {len(self._pending_acks)} pending ACKs") from e
+
+    # ----- internal -----
+
+    async def _resolve_topic_arg(
+        self,
+        topic: str | int | None,
+        topic_id: int | None,
+    ) -> int:
+        """Resolve the topic argument to a numeric ID."""
+        if topic is None and topic_id is not None:
+            warnings.warn(
+                "topic_id= is deprecated, use topic= instead",
+                DeprecationWarning,
+                stacklevel=3,
+            )
+            topic = topic_id
+        if topic is None:
+            raise ValueError("topic is required")
+        if isinstance(topic, int):
+            return topic
+        return await self._resolve_topic(topic)
+
+    async def _resolve_topic(self, name: str) -> int:
+        """Resolve a topic name to its numeric ID, using cache when possible."""
+        cached = self._topic_cache.get(name)
+        if cached is not None:
+            return cached
+
+        from lnc_client.client import LanceClient
+
+        mgmt_cfg = ClientConfig(
+            host=self._host,
+            port=self._port,
+            connect_timeout_s=self._config.connect_timeout_s,
+            ssl_context=self._config.ssl_context,
+        )
+        mgmt = LanceClient(mgmt_cfg)
+        try:
+            await mgmt.connect()
+            info = await mgmt.ensure_topic_default(name)
+            self._topic_cache[name] = info.id
+            return info.id
+        finally:
+            await mgmt.close()
+
+    async def _send_internal(
         self,
         topic_id: int,
         data: bytes,
         *,
         record_type: int = RecordType.RAW_DATA,
     ) -> int:
-        """Send data without waiting for ACK (pipelined). Returns batch_id."""
+        """Internal send — takes a resolved numeric topic_id."""
         if self._closed:
             raise ConnectionError("Producer is closed")
 
@@ -146,64 +291,6 @@ class Producer:
 
         await self._conn.send_frame(frame)
         return batch_id
-
-    async def send_batch(
-        self,
-        topic_id: int,
-        records: list[TlvRecord],
-    ) -> int:
-        """Send multiple TLV records as a single batch. Waits for ACK."""
-        if self._closed:
-            raise ConnectionError("Producer is closed")
-
-        payload = encode_records(records)
-
-        compressed = False
-        if self._config.compression:
-            import lz4.block
-
-            compressed_payload = lz4.block.compress(payload, store_size=False)
-            if len(compressed_payload) < len(payload):
-                payload = compressed_payload
-                compressed = True
-
-        self._batch_id += 1
-        batch_id = self._batch_id
-
-        frame = build_ingest_frame(
-            payload=payload,
-            batch_id=batch_id,
-            record_count=len(records),
-            topic_id=topic_id,
-            compressed=compressed,
-        )
-
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._pending_acks[batch_id] = fut
-
-        await self._conn.send_frame(frame)
-        await self._wait_ack(batch_id)
-        return batch_id
-
-    async def flush(self, timeout: float = 30.0) -> None:
-        """Wait for all pending ACKs to be resolved.
-
-        Ensures all previously sent records have been acknowledged by the server.
-        """
-        if not self._pending_acks:
-            return
-
-        pending = list(self._pending_acks.values())
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*pending, return_exceptions=True),
-                timeout=timeout,
-            )
-        except asyncio.TimeoutError as e:
-            raise LanceError(f"Flush timed out with {len(self._pending_acks)} pending ACKs") from e
-
-    # ----- internal -----
 
     async def _wait_ack(self, batch_id: int, timeout: float = 30.0) -> None:
         """Wait for a specific batch_id to be acknowledged."""

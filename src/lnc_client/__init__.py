@@ -14,20 +14,20 @@ Example usage::
         # Management client
         cfg = ClientConfig(host="127.0.0.1", port=1992)
         async with LanceClient(cfg) as client:
-            topic = await client.create_topic("my-events")
+            topic = await client.ensure_topic("my-events")
             topics = await client.list_topics()
             print(topics)
 
-        # Producer
+        # Producer (name-based)
         prod = await Producer.connect("127.0.0.1:1992", ProducerConfig())
-        await prod.send(topic_id=1, data=b'hello world')
+        await prod.send(topic="my-events", data=b'hello world')
         await prod.flush()
         await prod.close()
 
-        # Consumer
+        # Consumer (name-based)
         cons = await StandaloneConsumer.connect(
             "127.0.0.1:1992",
-            StandaloneConfig(consumer_name="my-consumer", topic_id=1),
+            StandaloneConfig.with_topic_name("my-consumer", "my-events"),
         )
         records = await cons.poll()
         await cons.commit()
@@ -41,8 +41,10 @@ from lnc_client.config import (
     ClientConfig,
     ProducerConfig,
     ReconnectConfig,
+    RetentionInfo,
     SeekPosition,
     StandaloneConfig,
+    TopicInfo,
 )
 from lnc_client.consumer import PollResult, StandaloneConsumer
 from lnc_client.errors import (
@@ -50,6 +52,7 @@ from lnc_client.errors import (
     BackpressureError,
     ConnectionError,
     InvalidFrameError,
+    InvalidTopicNameError,
     LanceError,
     NotLeaderError,
     ProtocolError,
@@ -57,6 +60,7 @@ from lnc_client.errors import (
     TimeoutError,
     TopicAlreadyExistsError,
     TopicNotFoundError,
+    validate_topic_name,
 )
 from lnc_client.offset import FileOffsetStore, MemoryOffsetStore, OffsetStore
 from lnc_client.producer import Producer
@@ -71,7 +75,7 @@ from lnc_client.protocol import (
 )
 from lnc_client.tlv import RecordType, TlvRecord, decode_records, encode_records
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Protocol
@@ -95,16 +99,20 @@ __all__ = [
     "BackpressureError",
     "TopicNotFoundError",
     "TopicAlreadyExistsError",
+    "InvalidTopicNameError",
     "NotLeaderError",
     "ServerCatchingUpError",
     "AccessDeniedError",
     "InvalidFrameError",
+    "validate_topic_name",
     # Config
     "ClientConfig",
     "ProducerConfig",
     "StandaloneConfig",
     "ReconnectConfig",
     "SeekPosition",
+    "TopicInfo",
+    "RetentionInfo",
     # Client
     "LanceClient",
     # Producer

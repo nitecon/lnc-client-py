@@ -27,7 +27,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 
-from lnc_client.config import SeekPosition, StandaloneConfig
+from lnc_client.config import ClientConfig, SeekPosition, StandaloneConfig
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import ConnectionError, LanceError, ServerCatchingUpError
 from lnc_client.offset import FileOffsetStore, OffsetStore
@@ -124,6 +124,29 @@ class StandaloneConsumer:
         )
         await conn.connect()
 
+        # Resolve topic_name -> topic_id if needed
+        if config.topic_id == 0 and config.topic_name is not None:
+            from lnc_client.client import LanceClient
+
+            mgmt_cfg = ClientConfig(
+                host=host,
+                port=port,
+                connect_timeout_s=config.connect_timeout_s,
+                ssl_context=config.ssl_context,
+            )
+            mgmt = LanceClient(mgmt_cfg)
+            try:
+                await mgmt.connect()
+                topic_info = await mgmt.ensure_topic_default(config.topic_name)
+                config.topic_id = topic_info.id
+                log.info(
+                    "Resolved topic '%s' -> id %d",
+                    config.topic_name,
+                    config.topic_id,
+                )
+            finally:
+                await mgmt.close()
+
         # Auto-create FileOffsetStore if offset_dir configured
         if offset_store is None and config.offset_dir is not None:
             offset_store = FileOffsetStore(config.offset_dir)
@@ -133,21 +156,25 @@ class StandaloneConsumer:
 
         # Restore persisted offset if available
         if offset_store is not None:
-            saved = await offset_store.load(config.consumer_name, config.topic_id)
+            saved = await offset_store.load(
+                config.consumer_name,
+                config.topic_id,
+                topic_name=config.topic_name,
+            )
             if saved is not None:
                 consumer._current_offset = saved
                 log.info(
-                    "Restored offset %d for consumer '%s' topic %d",
+                    "Restored offset %d for consumer '%s' topic %s",
                     saved,
                     config.consumer_name,
-                    config.topic_id,
+                    config.topic_name or config.topic_id,
                 )
 
         log.info(
-            "Consumer '%s' connected to %s for topic %d at offset %d",
+            "Consumer '%s' connected to %s for topic %s at offset %d",
             config.consumer_name,
             address,
-            config.topic_id,
+            config.topic_name or config.topic_id,
             consumer._current_offset,
         )
         return consumer
@@ -171,6 +198,11 @@ class StandaloneConsumer:
     @property
     def topic_id(self) -> int:
         return self._topic_id
+
+    @property
+    def topic_name(self) -> str | None:
+        """Topic name if configured, otherwise None."""
+        return self._config.topic_name
 
     # ----- polling -----
 
@@ -333,4 +365,5 @@ class StandaloneConsumer:
                 self._consumer_name,
                 self._topic_id,
                 self._current_offset,
+                topic_name=self._config.topic_name,
             )

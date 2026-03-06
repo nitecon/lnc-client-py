@@ -7,6 +7,7 @@ from lnc_client.errors import (
     BackpressureError,
     ConnectionError,
     InvalidFrameError,
+    InvalidTopicNameError,
     LanceError,
     NotLeaderError,
     ProtocolError,
@@ -143,3 +144,27 @@ class TestExceptionHierarchy:
 
     def test_invalid_frame_is_protocol_error(self):
         assert issubclass(InvalidFrameError, ProtocolError)
+
+    def test_invalid_topic_name_inherits(self):
+        assert issubclass(InvalidTopicNameError, LanceError)
+
+
+class TestInvalidTopicNameError:
+    """Test InvalidTopicNameError attributes."""
+
+    def test_message(self):
+        err = InvalidTopicNameError("bad!")
+        assert "bad!" in str(err)
+        assert err.name == "bad!"
+
+    def test_not_retryable(self):
+        assert not InvalidTopicNameError("x").is_retryable()
+
+
+class TestErrorFromResponseInvalidTopicName:
+    """Test error_from_response for InvalidTopicName (0x12)."""
+
+    def test_returns_invalid_topic_name_error(self):
+        err = error_from_response(0x12, "bad name")
+        assert isinstance(err, InvalidTopicNameError)
+        assert err.name == "bad name"

@@ -22,6 +22,7 @@ from lnc_client.config import ClientConfig, RetentionInfo, TopicInfo
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import (
     LanceError,
+    TopicNotFoundError,
     error_from_response,
     validate_topic_name,
 )
@@ -219,6 +220,33 @@ class LanceClient:
         self._cache_topic(info)
         return info
 
+    async def get_topic_by_name(self, name: str) -> TopicInfo:
+        """Look up a topic strictly by name without creating it.
+
+        Unlike ``ensure_topic``, this method never creates a new topic.  It
+        lists all topics and matches by name.  Use this when the topic *must*
+        already exist and a missing topic should be surfaced as an error.
+
+        Args:
+            name: Topic name to look up.
+
+        Returns:
+            ``TopicInfo`` for the matched topic.
+
+        Raises:
+            ValueError: If ``name`` contains invalid characters.
+            TopicNotFoundError: If no topic with that name exists.
+        """
+        validate_topic_name(name)
+        all_topics = await self.list_topics()
+        matched = [t for t in all_topics if t.name == name]
+        if not matched:
+            available = [t.name for t in all_topics]
+            raise TopicNotFoundError(
+                f"Lance topic '{name}' not found. Available topics: {available}."
+            )
+        return matched[0]
+
     async def set_retention(
         self,
         topic_id: int,
@@ -241,6 +269,7 @@ class LanceClient:
         max_bytes: int = 0,
     ) -> TopicInfo:
         """Create a topic with retention policy in a single operation."""
+        validate_topic_name(name)
         payload = build_create_topic_with_retention_payload(name, max_age_secs, max_bytes)
         frame = build_control_frame(ControlCommand.CREATE_TOPIC_WITH_RETENTION, payload)
         await self._conn.send_frame(frame)

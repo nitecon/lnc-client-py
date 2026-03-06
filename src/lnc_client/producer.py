@@ -3,7 +3,16 @@
 Collects records until batch_size OR linger_ms is reached, then sends
 an Ingest frame and waits for server ACK. Supports optional LZ4 compression.
 
-Example::
+Example (name-based, preferred)::
+
+    producer, topic_id = await Producer.connect_for_topic(
+        "10.0.10.11:1992", "rithmic-dev", ProducerConfig()
+    )
+    await producer.send(topic_id=topic_id, data=b'{"price": 6942.25}')
+    await producer.flush()
+    await producer.close()
+
+Example (ID-based, legacy)::
 
     producer = await Producer.connect("10.0.10.11:1992", ProducerConfig())
     await producer.send(topic="my-events", data=b'{"price": 6942.25}')
@@ -19,7 +28,7 @@ import contextlib
 import logging
 import warnings
 
-from lnc_client.config import ClientConfig, ProducerConfig
+from lnc_client.config import ClientConfig, ProducerConfig, validate_topic_name
 from lnc_client.connection import LwpConnection
 from lnc_client.errors import ConnectionError, LanceError
 from lnc_client.protocol import (
@@ -56,6 +65,9 @@ class Producer:
         Args:
             address: "host:port" string.
             config: Producer configuration.
+
+        Returns:
+            A connected ``Producer`` instance.
         """
         cfg = config or ProducerConfig()
         host, _, port_str = address.rpartition(":")
@@ -77,6 +89,59 @@ class Producer:
         prod._port = port
         prod._ack_reader_task = asyncio.create_task(prod._ack_reader_loop())
         return prod
+
+    @classmethod
+    async def connect_for_topic(
+        cls,
+        address: str,
+        topic_name: str,
+        config: ProducerConfig | None = None,
+    ) -> tuple[Producer, int]:
+        """Connect to a Lance server and resolve a topic name to its numeric ID.
+
+        This is the preferred entry-point for name-based usage.  It validates
+        the topic name, opens a management connection to resolve (or create) the
+        topic, then returns a ready-to-use ``Producer`` together with the
+        resolved numeric topic ID.
+
+        The topic creation call is idempotent — if the topic already exists the
+        server returns its existing metadata without error.
+
+        Args:
+            address: "host:port" string for the Lance server.
+            topic_name: Human-readable topic name.  Must match ``[a-zA-Z0-9-]+``.
+            config: Optional producer configuration.
+
+        Returns:
+            A ``(Producer, topic_id)`` tuple.
+
+        Raises:
+            ValueError: If ``topic_name`` contains invalid characters.
+        """
+        validate_topic_name(topic_name)
+
+        # Parse address for the management client
+        host, _, port_str = address.rpartition(":")
+        port = int(port_str) if port_str else 1992
+        if not host:
+            host = address
+
+        # Resolve name → ID via management channel
+        from lnc_client.client import LanceClient
+
+        async with LanceClient(ClientConfig(host=host, port=port)) as client:
+            topic = await client.ensure_topic(topic_name)
+
+        topic_id: int = topic.id
+        log.info(
+            "Resolved topic '%s' to id=%d for producer at %s",
+            topic_name,
+            topic_id,
+            address,
+        )
+
+        producer = await cls.connect(address, config)
+        return producer, topic_id
 
     async def close(self) -> None:
         """Close the producer and its connection."""

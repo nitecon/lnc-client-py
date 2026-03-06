@@ -4,6 +4,9 @@ High-performance, low-latency data streaming client implementing the LWP
 binary protocol with CRC32C validation, TLV record encoding, batched
 production, and offset-based consumption.
 
+Topics are addressed by **name** throughout this library.  Numeric topic IDs
+are an implementation detail of the wire protocol and are resolved internally.
+
 Example usage::
 
     import asyncio
@@ -11,7 +14,7 @@ Example usage::
     from lnc_client import StandaloneConsumer, StandaloneConfig, SeekPosition
 
     async def main():
-        # Management client
+        # Management client — name-based topic creation (idempotent)
         cfg = ClientConfig(host="127.0.0.1", port=1992)
         async with LanceClient(cfg) as client:
             topic = await client.ensure_topic("my-events")

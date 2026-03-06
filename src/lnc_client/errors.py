@@ -73,7 +73,10 @@ class InvalidTopicNameError(LanceError):
     """Topic name does not match the required pattern ``[a-zA-Z0-9-]+``."""
 
     def __init__(self, name: str) -> None:
-        super().__init__(f"Invalid topic name: {name!r}")
+        super().__init__(
+            f"Invalid topic name: {name!r}. "
+            "Names must contain only alphanumeric characters and dashes ([a-zA-Z0-9-])."
+        )
         self.name = name
 
 
@@ -143,6 +146,9 @@ def error_from_response(code: int, message: str, details: dict | None = None) ->
         return NotLeaderError(leader)
     if exc_class is TopicNotFoundError:
         return TopicNotFoundError(message)
+    if exc_class is InvalidTopicNameError:
+        # Extract raw name from message if possible; fall back to the full message
+        return InvalidTopicNameError(message)
     if exc_class is ServerCatchingUpError:
         offset = details.get("server_offset", 0) if details else 0
         return ServerCatchingUpError(offset)
